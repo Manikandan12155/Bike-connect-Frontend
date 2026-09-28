@@ -127,7 +127,7 @@ function App() {
   const replayLog = async () => {
     try {
       setBtStatus("Fetching Replay...");
-      const res = await fetch('http://127.0.0.1:8000/replay_log');
+      const res = await fetch('https://bike-connect-backend.onrender.com/replay_log');
       const text = await res.text();
       const lines = text.split('\n').filter(l => l.includes('] 6b 05 '));
 
