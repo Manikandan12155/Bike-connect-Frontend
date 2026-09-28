@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './index.css';
 import {
   Bluetooth, MapPin, Activity, Music, Settings, LayoutDashboard,
@@ -24,14 +24,28 @@ function App() {
   const [engineLoad, setEngineLoad] = useState(0);
   const [avgSpeed, setAvgSpeed] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
+  const allLogsRef = useRef<string[]>([]);
   const [secretKey] = useState("AA017F0035303030303030303030303030303030303030303030613934356632643733623234666463613934656338373333376332363564620005E6");
 
   const addLog = (msg: string) => {
+    const timestamp = new Date().toISOString();
+    allLogsRef.current.push(`[${timestamp}] ${msg}`);
     setLogs(prev => {
         const newLogs = [...prev, msg];
         if (newLogs.length > 50) newLogs.shift();
         return newLogs;
     });
+  };
+
+  const downloadLog = () => {
+    const logText = allLogsRef.current.join('\n');
+    const blob = new Blob([logText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bike_connect_log_${new Date().getTime()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const formatRideTime = (seconds: number) => {
@@ -46,27 +60,28 @@ function App() {
       setBtStatus("Connecting BT...");
       const device = await (navigator as any).bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
+        optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
       });
       
       const server = await device.gatt?.connect();
       if (!server) throw new Error("No GATT server");
       
-      const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
-      const characteristic = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
+      const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
+      const writeChar = await service.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
+      const notifyChar = await service.getCharacteristic('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
       
       if (secretKey) {
          addLog("[AUTH] Sending secret key...");
-         const hexArray = secretKey.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || [];
-         await characteristic.writeValue(new Uint8Array(hexArray));
+         const hexArray = secretKey.match(/.{1,2}/g)?.map((byte: string) => parseInt(byte, 16)) || [];
+         await writeChar.writeValue(new Uint8Array(hexArray));
          addLog("[AUTH] Key sent successfully.");
       }
 
-      await characteristic.startNotifications();
+      await notifyChar.startNotifications();
       
       setBtStatus("Connected BT");
       
-      characteristic.addEventListener('characteristicvaluechanged', (event: any) => {
+      notifyChar.addEventListener('characteristicvaluechanged', (event: any) => {
         const value = event.target.value;
         const bytes = new Uint8Array(value.buffer);
         
@@ -74,25 +89,22 @@ function App() {
         addLog(`[BT-UART] ` + hexStr);
 
         if (bytes.length >= 20 && bytes[0] === 0x6b && bytes[1] === 0x05) {
-          const currentSpeed = bytes[16]; 
+          const currentSpeed = bytes[14]; 
           const currentTemp = bytes[9];   
-          const rpmMsb = bytes[5];
-          const rpmLsb = bytes[6];
-          const currentRpm = ((rpmMsb << 8) | rpmLsb) * 5; 
+          const currentRpm = (bytes[5] << 8) | bytes[6]; 
           
           const currentBattery = (bytes[27] / 10) + 1.2;
           const currentThrottle = Math.min(100, Math.round((bytes[21] / 191) * 100));
           const currentLean = bytes[34] ? bytes[34] - 128 : 0;
           
-          let currentGear = 1;
-          if (currentSpeed === 0) currentGear = 0;
-          else {
+          let currentGear = 0;
+          if (currentSpeed > 2 && currentRpm > 1000) {
              const ratio = currentSpeed / currentRpm;
-             if (ratio > 0.02) currentGear = 6;
-             else if (ratio > 0.015) currentGear = 5;
-             else if (ratio > 0.011) currentGear = 4;
-             else if (ratio > 0.008) currentGear = 3;
-             else if (ratio > 0.005) currentGear = 2;
+             if (ratio > 0.0128) currentGear = 6;
+             else if (ratio > 0.0112) currentGear = 5;
+             else if (ratio > 0.0095) currentGear = 4;
+             else if (ratio > 0.0075) currentGear = 3;
+             else if (ratio > 0.0055) currentGear = 2;
              else currentGear = 1;
           }
           
@@ -236,6 +248,7 @@ function App() {
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
                   <button className="action-btn connect-btn" onClick={connectBluetooth}>CONNECT BT</button>
                   <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY LOG" : btStatus}</button>
+                  <button className="action-btn" style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }} onClick={downloadLog}>SAVE LOG</button>
                 </div>
                 <span className="bt-id">YCCU_00080400007795</span>
               </div>
