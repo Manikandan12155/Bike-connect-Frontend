@@ -889,14 +889,15 @@ body {
   .dashboard-grid {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 12px;
+    gap: 16px;
+    padding: 24px 16px 16px 16px;
   }
 
   .hero-cockpit {
-    height: 380px;
+    height: 340px;
     padding: 16px;
     justify-content: center;
+    align-items: center;
   }
 
   .bike-model-container {
@@ -916,9 +917,23 @@ body {
 
   .telemetry-sidebar {
     width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .telemetry-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 12px;
+  }
+  
+  .indicators-panel {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px 0;
   }
 
   .bottom-row {
