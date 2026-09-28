@@ -233,9 +233,9 @@ function App() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Bluetooth className="bt-icon" size={20} />
               <div className="bt-info">
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <span className="bt-connected" style={{ cursor: 'pointer', color: 'var(--green-accent)' }} onClick={connectBluetooth}>CONNECT BT</span>
-                  <span className="bt-connected" style={{ cursor: 'pointer' }} onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY LOG" : btStatus}</span>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                  <button className="action-btn connect-btn" onClick={connectBluetooth}>CONNECT BT</button>
+                  <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY LOG" : btStatus}</button>
                 </div>
                 <span className="bt-id">YCCU_00080400007795</span>
               </div>

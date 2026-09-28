@@ -894,7 +894,9 @@ body {
   }
 
   .hero-cockpit {
+    min-height: 340px;
     height: 340px;
+    flex-shrink: 0;
     padding: 16px;
     justify-content: center;
     align-items: center;
@@ -986,4 +988,38 @@ body {
   .mobile-bottom-nav {
     display: none;
   }
+}
+
+.action-btn {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.connect-btn {
+  color: var(--green-accent);
+  border-color: rgba(0, 255, 102, 0.3);
+}
+
+.connect-btn:hover {
+  background: rgba(0, 255, 102, 0.15);
+}
+
+.play-btn {
+  color: var(--cyan-primary);
+  border-color: rgba(0, 243, 255, 0.3);
+}
+
+.play-btn:hover {
+  background: rgba(0, 243, 255, 0.15);
 }
