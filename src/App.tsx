@@ -3,7 +3,7 @@ import './index.css';
 import {
   Bluetooth, MapPin, Activity, Music, Settings, LayoutDashboard,
   Battery, Thermometer, Navigation2, Map as MapIcon, Route, Zap, Home, Settings2, Play, SkipBack, SkipForward,
-  Lightbulb, AlertCircle, Droplets, Gauge, ArrowLeft, ArrowRight, ArrowUpRight
+  Lightbulb, AlertCircle, Droplets, Gauge, ArrowLeft, ArrowRight, ArrowUpRight, Terminal
 } from 'lucide-react';
 
 function App() {
@@ -17,6 +17,7 @@ function App() {
   const [leanAngle, setLeanAngle] = useState(0);
   const [btStatus, setBtStatus] = useState("Disconnected");
   const [time, setTime] = useState(new Date());
+  const [showLogs, setShowLogs] = useState(false);
 
   const [tripDistance, setTripDistance] = useState(0);
   const [topSpeed, setTopSpeed] = useState(0);
@@ -25,7 +26,7 @@ function App() {
   const [avgSpeed, setAvgSpeed] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const allLogsRef = useRef<string[]>([]);
-  const [secretKey] = useState("AA017F0035303030303030303030303030303030303030303030613934356632643733623234666463613934656338373333376332363564620005E6");
+  const [secretKey] = useState(import.meta.env.VITE_BT_SECRET_KEY || "");
 
   const addLog = (msg: string) => {
     const timestamp = new Date().toISOString();
@@ -60,15 +61,15 @@ function App() {
       setBtStatus("Connecting BT...");
       const device = await (navigator as any).bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
+        optionalServices: [import.meta.env.VITE_BT_SERVICE_UUID || '6e400001-b5a3-f393-e0a9-e50e24dcca9e']
       });
       
       const server = await device.gatt?.connect();
       if (!server) throw new Error("No GATT server");
       
-      const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
-      const writeChar = await service.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
-      const notifyChar = await service.getCharacteristic('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
+      const service = await server.getPrimaryService(import.meta.env.VITE_BT_SERVICE_UUID || '6e400001-b5a3-f393-e0a9-e50e24dcca9e');
+      const writeChar = await service.getCharacteristic(import.meta.env.VITE_BT_WRITE_UUID || '6e400002-b5a3-f393-e0a9-e50e24dcca9e');
+      const notifyChar = await service.getCharacteristic(import.meta.env.VITE_BT_NOTIFY_UUID || '6e400003-b5a3-f393-e0a9-e50e24dcca9e');
       
       if (secretKey) {
          addLog("[AUTH] Sending secret key...");
@@ -231,30 +232,20 @@ function App() {
           <h1>BIKE CONNECT <span>MT-15</span></h1>
         </div>
 
-        <nav className="header-nav">
-          <div className="nav-item active"><LayoutDashboard size={20} /> Dashboard</div>
-          <div className="nav-item"><MapIcon size={20} /> Live Map</div>
-          <div className="nav-item"><Activity size={20} /> Ride Analytics</div>
-          <div className="nav-item"><Route size={20} /> Trips</div>
-          <div className="nav-item"><Music size={20} /> Music</div>
-          <div className="nav-item"><Settings size={20} /> Settings</div>
-        </nav>
 
         <div className="header-status">
-          <div className="bt-status" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Bluetooth className="bt-icon" size={20} />
-              <div className="bt-info">
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
-                  <button className="action-btn connect-btn" onClick={connectBluetooth}>CONNECT BT</button>
-                  <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY LOG" : btStatus}</button>
-                  <button className="action-btn" style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }} onClick={downloadLog}>SAVE LOG</button>
+          <div className="mobile-bt-controls">
+            <div className="bt-status" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Bluetooth className="bt-icon" size={20} />
+                <div className="bt-info">
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+                    <button className="action-btn connect-btn" onClick={connectBluetooth}>CONNECT</button>
+                    <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY" : btStatus}</button>
+                  </div>
+                  <span className="bt-id">{import.meta.env.VITE_BT_DEVICE_ID || "YCCU_00080400007795"}</span>
                 </div>
-                <span className="bt-id">YCCU_00080400007795</span>
               </div>
-            </div>
-            <div className="secret-key-box" style={{ fontSize: '0.7rem', color: 'var(--text-dim)', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--glass-border)' }}>
-              KEY: {secretKey.substring(0, 16)}...
             </div>
           </div>
           <div className="time-display">
@@ -273,9 +264,28 @@ function App() {
           <div className="nav-item"><MapPin size={20} /> Live Map</div>
           <div className="nav-item"><Activity size={20} /> Ride Analytics</div>
           <div className="nav-item"><Route size={20} /> Trips & History</div>
-          <div className="nav-item"><Music size={20} /> Music Control</div>
           <div className="nav-item"><Settings2 size={20} /> Bike Status</div>
-          <div className="nav-item" style={{ marginTop: 'auto' }}><Settings size={20} /> Settings</div>
+          <div className="nav-item" onClick={() => setShowLogs(!showLogs)} style={{ cursor: 'pointer' }}>
+            <Terminal size={20} color={showLogs ? "var(--cyan-primary)" : "currentColor"} /> System Logs
+          </div>
+          
+          <div className="desktop-bt-controls" style={{ marginTop: 'auto', marginBottom: '8px' }}>
+            <div className="bt-status" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px', padding: '12px', background: 'rgba(0, 255, 102, 0.05)', border: '1px solid rgba(0, 255, 102, 0.2)', borderRadius: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Bluetooth className="bt-icon" size={20} />
+                <div className="bt-info">
+                  <span className="bt-id" style={{fontSize: '0.75rem'}}>{import.meta.env.VITE_BT_DEVICE_ID || "YCCU_00080400007795"}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                <button className="action-btn connect-btn" onClick={connectBluetooth}>CONNECT BT</button>
+                <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY LOG" : btStatus}</button>
+                <button className="action-btn" style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }} onClick={downloadLog}>SAVE</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="nav-item"><Settings size={20} /> Settings</div>
         </aside>
 
         {/* DASHBOARD GRID */}
@@ -461,27 +471,24 @@ function App() {
               </svg>
             </div>
 
-            <div className="panel music-player">
-              <img src="https://i.scdn.co/image/ab67616d0000b273570776bf0ed2195f269a9b6c" alt="Album Art" className="album-art" />
-              <div className="track-info">
-                <span className="t-title">Naa Ready</span>
-                <span className="t-artist">Anirudh Ravichander</span>
-              </div>
-              <div className="music-controls">
-                <SkipBack className="m-btn" size={20} />
-                <Play className="m-btn" size={24} fill="currentColor" />
-                <SkipForward className="m-btn" size={20} />
+          </div>
+          
+          {/* TERMINAL MODAL/OVERLAY */}
+          {showLogs && (
+            <div className="terminal-overlay">
+              <div className="panel terminal-panel">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ color: 'var(--cyan-primary)', fontWeight: 'bold' }}>// SYSTEM TELEMETRY LOGS</div>
+                  <button className="action-btn" onClick={() => setShowLogs(false)}>CLOSE</button>
+                </div>
+                <div className="terminal-content">
+                  {logs.map((l, idx) => (
+                    <div key={idx}>{l}</div>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* TERMINAL ROW */}
-          <div className="panel terminal-panel" style={{ gridColumn: '1 / -1', height: '150px', background: 'rgba(5, 10, 20, 0.9)', overflowY: 'auto', padding: '10px', fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--cyan-primary)' }}>
-            <div style={{ color: '#aaa', marginBottom: '5px' }}>// SYSTEM TELEMETRY LOGS</div>
-            {logs.map((l, idx) => (
-              <div key={idx}>{l}</div>
-            ))}
-          </div>
+          )}
 
         </div>
       </main>
