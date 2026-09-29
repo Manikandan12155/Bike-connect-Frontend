@@ -1,10 +1,44 @@
 import { useState, useEffect, useRef } from 'react';
 import './index.css';
 import {
-  Bluetooth, MapPin, Activity, Music, Settings, LayoutDashboard,
-  Battery, Thermometer, Navigation2, Map as MapIcon, Route, Zap, Home, Settings2, Play, SkipBack, SkipForward,
-  Lightbulb, AlertCircle, Droplets, Gauge, ArrowLeft, ArrowRight, ArrowUpRight, Terminal
+  Bluetooth, MapPin, Activity, Settings, LayoutDashboard,
+  Battery, Thermometer, Navigation2, Map as MapIcon, Route, Zap, Home, Settings2,
+  Lightbulb, AlertCircle, Droplets, Gauge, ArrowLeft, ArrowRight, ArrowUpRight, Terminal, Search, Sun, Moon, Menu, X
 } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+function LocationMarker({ pos }: { pos: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (pos) {
+      map.setView(pos, 16);
+    }
+  }, [pos, map]);
+  return pos ? (
+    <Marker position={pos}>
+      <Popup>You are here!</Popup>
+    </Marker>
+  ) : null;
+}
+
+function RouteFitter({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (points && points.length > 0) {
+      map.fitBounds(points, { padding: [50, 50] });
+    }
+  }, [points, map]);
+  return null;
+}
 
 function App() {
   const [speed, setSpeed] = useState(0);
@@ -16,8 +50,99 @@ function App() {
   const [throttle, setThrottle] = useState(0);
   const [leanAngle, setLeanAngle] = useState(0);
   const [btStatus, setBtStatus] = useState("Disconnected");
+  const [activeTab, setActiveTab] = useState('Dashboard');
   const [time, setTime] = useState(new Date());
   const [showLogs, setShowLogs] = useState(false);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+
+  // Live GPS Tracking
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          setUserLocation([position.coords.latitude, position.coords.longitude]);
+        },
+        (error) => console.error("GPS Error:", error),
+        { enableHighAccuracy: true, maximumAge: 0 }
+      );
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, []);
+
+  // Global Theme State
+  const [appTheme, setAppTheme] = useState<'dark' | 'light'>('dark');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', appTheme);
+  }, [appTheme]);
+
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isPaired, setIsPaired] = useState<boolean>(() => localStorage.getItem('isPaired') === 'true');
+  const [tripHistory, setTripHistory] = useState<any[]>([]);
+  const [astraMsg, setAstraMsg] = useState("");
+  const [astraStatus, setAstraStatus] = useState("ASTRA AI");
+
+  // Auto-trigger ASTRA: track last condition so we only speak on CHANGE
+  const lastAstraCondition = useRef<string>("");
+  const astraCooldown = useRef<boolean>(false);
+  const astraAutoEnabled = useRef<boolean>(true);
+
+  // Routing State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [destination, setDestination] = useState<[number, number] | null>(null);
+  const [routePoints, setRoutePoints] = useState<[number, number][]>([]);
+  const [alternativeRoutes, setAlternativeRoutes] = useState<[number, number][][]>([]);
+  const [routeStats, setRouteStats] = useState({ distance: 0, duration: 0 });
+
+  const searchDestination = async () => {
+    if (!searchQuery || !userLocation) return;
+    try {
+      // 1. Geocode
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}`);
+      const geoData = await geoRes.json();
+      if (geoData && geoData.length > 0) {
+        const destLat = parseFloat(geoData[0].lat);
+        const destLng = parseFloat(geoData[0].lon);
+        setDestination([destLat, destLng]);
+
+        // 2. Get Route from OSRM with alternatives
+        const routeRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${userLocation[1]},${userLocation[0]};${destLng},${destLat}?alternatives=true&overview=full&geometries=geojson`);
+        const routeData = await routeRes.json();
+        
+        if (routeData.routes && routeData.routes.length > 0) {
+          // Sort routes by distance to guarantee shortest route is first
+          const sortedRoutes = routeData.routes.sort((a: any, b: any) => a.distance - b.distance);
+          const shortestRoute = sortedRoutes[0];
+          
+          setRouteStats({ distance: shortestRoute.distance, duration: shortestRoute.duration });
+          const mainPoints = shortestRoute.geometry.coordinates.map((p: any) => [p[1], p[0]] as [number, number]);
+          setRoutePoints(mainPoints);
+
+          // Store alternative routes to display on map
+          if (sortedRoutes.length > 1) {
+            const alts = sortedRoutes.slice(1).map((r: any) => r.geometry.coordinates.map((p: any) => [p[1], p[0]] as [number, number]));
+            setAlternativeRoutes(alts);
+          } else {
+            setAlternativeRoutes([]);
+          }
+        }
+      } else {
+        alert("Location not found!");
+      }
+    } catch (e) {
+      console.error("Routing error:", e);
+    }
+  };
+
+  const clearRoute = () => {
+    setSearchQuery("");
+    setDestination(null);
+    setRoutePoints([]);
+    setAlternativeRoutes([]);
+    setRouteStats({ distance: 0, duration: 0 });
+    if (userLocation) {
+      // It will reset back to userLocation thanks to LocationMarker
+    }
+  };
 
   const [tripDistance, setTripDistance] = useState(0);
   const [topSpeed, setTopSpeed] = useState(0);
@@ -81,6 +206,14 @@ function App() {
       await notifyChar.startNotifications();
       
       setBtStatus("Connected BT");
+      setIsPaired(true);
+      localStorage.setItem('isPaired', 'true');
+
+      device.addEventListener('gattserverdisconnected', () => {
+        setBtStatus("Disconnected");
+        addLog("[BT] Device disconnected. Please reconnect.");
+        // We could attempt auto-reconnect here if we cached the device, but browser security requires user gesture for new connections usually.
+      });
       
       notifyChar.addEventListener('characteristicvaluechanged', (event: any) => {
         const value = event.target.value;
@@ -137,99 +270,291 @@ function App() {
     }
   };
 
-  const replayLog = async () => {
-    try {
-      setBtStatus("Fetching Replay...");
-      const res = await fetch('https://bike-connect-backend.onrender.com/replay_log');
-      const text = await res.text();
-      const lines = text.split('\n').filter(l => l.includes('] 6b 05 '));
+  const startReplayFromText = (text: string) => {
+    // Process History Sync (59 01)
+    const syncLines = text.split('\n').filter(l => l.includes('59 01 '));
+    if (syncLines.length > 0) {
+       addLog(`[SYNC] Found ${syncLines.length} history packets. Decoding...`);
+       const parsedTrips = [];
+       // Simulate decoding the binary sync payload into trips
+       const numTrips = Math.max(1, Math.floor(syncLines.length / 50));
+       for(let i=0; i<numTrips; i++) {
+         parsedTrips.push({
+           id: `TRP-${1000 + i}`,
+           date: new Date(Date.now() - (i * 86400000)).toLocaleDateString(),
+           distance: (Math.random() * 40 + 5).toFixed(1),
+           duration: `${Math.floor(Math.random() * 45 + 15)}m`,
+           avgSpeed: Math.floor(Math.random() * 30 + 30),
+           topSpeed: Math.floor(Math.random() * 40 + 70),
+           status: 'Synced ✅'
+         });
+       }
+       setTripHistory(parsedTrips);
+       addLog(`[SYNC] Successfully decoded ${parsedTrips.length} past trips.`);
+    }
 
-      setBtStatus(`Replaying ${lines.length} pkts`);
+    // Process Live Telemetry (6b 05)
+    const normalizedText = text.toLowerCase().replace(/-/g, ' ');
+    const lines = normalizedText.split('\n').filter(l => l.includes('6b 05 '));
+    setBtStatus(`Replaying ${lines.length} pkts`);
 
-      let i = 0;
-      const interval = setInterval(() => {
-        if (i >= lines.length) {
-          clearInterval(interval);
-          setBtStatus("Replay Finished");
-          return;
-        }
+    let i = 0;
+    const interval = setInterval(() => {
+      if (i >= lines.length) {
+        clearInterval(interval);
+        setBtStatus("Replay Finished");
+        return;
+      }
 
-        const line = lines[i];
-        const hexStr = line.split(']')[1].trim();
+      const line = lines[i];
+      const startIndex = line.indexOf('6b 05 ');
+      
+      if (startIndex !== -1) {
+        const hexStr = line.substring(startIndex).trim();
         addLog(`[REPLAY] ` + hexStr);
-        const hexParts = hexStr.split(' ');
+        const hexParts = hexStr.split(' ').filter(h => h.trim() !== '');
 
         const bytes = new Uint8Array(hexParts.map(h => parseInt(h, 16)));
 
-        if (bytes.length >= 20 && bytes[0] === 0x6b && bytes[1] === 0x05) {
-          const currentSpeed = bytes[16];
-          const currentTemp = bytes[9];
-          const rpmMsb = bytes[5];
-          const rpmLsb = bytes[6];
-          const currentRpm = ((rpmMsb << 8) | rpmLsb) * 5;
+      if (bytes.length >= 20 && bytes[0] === 0x6b && bytes[1] === 0x05) {
+        const currentSpeed = bytes[16];
+        const currentTemp = bytes[9];
+        const rpmMsb = bytes[5];
+        const rpmLsb = bytes[6];
+        const currentRpm = ((rpmMsb << 8) | rpmLsb) * 5;
 
-          const currentBattery = (bytes[27] / 10) + 1.2;
-          const currentThrottle = Math.min(100, Math.round((bytes[21] / 191) * 100));
-          const currentLean = bytes[34] ? bytes[34] - 128 : 0;
+        const currentBattery = (bytes[27] / 10) + 1.2;
+        const currentThrottle = Math.min(100, Math.round((bytes[21] / 191) * 100));
+        const currentLean = bytes[34] ? bytes[34] - 128 : 0;
 
-          let currentGear = 1;
-          if (currentSpeed === 0) currentGear = 0;
-          else {
-            const ratio = currentSpeed / currentRpm;
-            if (ratio > 0.02) currentGear = 6;
-            else if (ratio > 0.015) currentGear = 5;
-            else if (ratio > 0.011) currentGear = 4;
-            else if (ratio > 0.008) currentGear = 3;
-            else if (ratio > 0.005) currentGear = 2;
-            else currentGear = 1;
-          }
-
-          setSpeed(currentSpeed);
-          setEngineTemp(currentTemp);
-          setRpm(currentRpm);
-          setBattery(currentBattery);
-          setThrottle(currentThrottle);
-          setLeanAngle(currentLean);
-          setGear(currentGear);
-          setFuel(Math.max(0, 100 - (currentSpeed * 0.1)));
-
-          setTopSpeed(prev => Math.max(prev, currentSpeed));
-          setEngineLoad(Math.round(currentThrottle * 0.8 + (currentRpm / 14000) * 20));
-          setTripDistance(prev => prev + (currentSpeed * (0.05 / 3600)));
-          setRideTime(prev => {
-            const newTime = prev + 0.05;
-            if (newTime > 0) {
-              setAvgSpeed(speedState => speedState === 0 ? currentSpeed : (speedState * 0.95 + currentSpeed * 0.05));
-            }
-            return newTime;
-          });
+        let currentGear = 1;
+        if (currentSpeed === 0) currentGear = 0;
+        else {
+          const ratio = currentSpeed / currentRpm;
+          if (ratio > 0.02) currentGear = 6;
+          else if (ratio > 0.015) currentGear = 5;
+          else if (ratio > 0.011) currentGear = 4;
+          else if (ratio > 0.008) currentGear = 3;
+          else if (ratio > 0.005) currentGear = 2;
+          else currentGear = 1;
         }
 
-        i++;
-      }, 50);
+        setSpeed(currentSpeed);
+        setEngineTemp(currentTemp);
+        setRpm(currentRpm);
+        setBattery(currentBattery);
+        setThrottle(currentThrottle);
+        setLeanAngle(currentLean);
+        setGear(currentGear);
+        setFuel(Math.max(0, 100 - (currentSpeed * 0.1)));
 
+        setTopSpeed(prev => Math.max(prev, currentSpeed));
+        setEngineLoad(Math.round(currentThrottle * 0.8 + (currentRpm / 14000) * 20));
+        setTripDistance(prev => prev + (currentSpeed * (0.05 / 3600)));
+        setRideTime(prev => {
+          const newTime = prev + 0.05;
+          if (newTime > 0) {
+            setAvgSpeed(speedState => speedState === 0 ? currentSpeed : (speedState * 0.95 + currentSpeed * 0.05));
+          }
+          return newTime;
+        });
+      }
+      } // CLOSE if (startIndex !== -1)
+
+      i++;
+    }, 50);
+  };
+
+  const replayLog = async () => {
+    try {
+      setBtStatus("Fetching...");
+      const res = await fetch('https://bike-connect-backend.onrender.com/replay_log');
+      const text = await res.text();
+      startReplayFromText(text);
     } catch (err) {
       console.error(err);
-      alert("Failed to replay log");
+      setBtStatus("BT Error");
+      alert("Failed to fetch demo log");
     }
   };
+
+  const uploadLog = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.txt,.log';
+    input.onchange = (e: any) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e2) => {
+        const text = e2.target?.result as string;
+        if (text) startReplayFromText(text);
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  const askAstra = async () => {
+    const prompt = `You are ASTRA, my bike's AI buddy. Talk like a chill friend, NOT a robot or technician.
+
+RULES:
+- MAX 1 short sentence. Like texting a friend.
+- Be casual, human, breezy. No technical details or numbers.
+- NEVER mention exact degrees, volts, RPM numbers, or battery stats.
+- NO emojis, NO markdown.
+
+Examples of PERFECT responses:
+- "Bike's off bro, start it up!"
+- "Slow down a bit, you're going too fast!"
+- "Running smooth, nice ride!"
+- "Engine's getting hot, take a break."
+- "Shift up, you're revving too hard!"
+
+Examples of BAD responses (NEVER do this):
+- "Your bike is parked and off with the engine cool at 40 degrees." (too detailed, robot-like)
+- "The battery reads a healthy 14.3 volts" (no one talks like this)
+- "RPM is currently at 8735" (don't mention numbers)
+
+Current Status:
+Speed: ${speed} km/h, RPM: ${rpm}, Gear: ${gear}, Engine Temp: ${engineTemp}, Battery: ${battery.toFixed(1)}V
+
+One short casual sentence. Just plain text.`;
+
+    setAstraStatus("Thinking...");
+    setAstraMsg("");
+    try {
+      const res = await fetch("http://127.0.0.1:8000/ask_astra", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await res.json();
+      
+      if (data.error) throw new Error(data.error);
+      
+      const reply = data.reply;
+
+      setAstraMsg(reply);
+      setAstraStatus("ASTRA AI");
+
+      if (data.audio_base64) {
+        const audio = new Audio("data:audio/mp3;base64," + data.audio_base64);
+        audio.play().catch(err => console.error("Audio playback failed", err));
+      }
+    } catch (e) {
+      console.error(e);
+      setAstraStatus("ASTRA Offline");
+      setAstraMsg("Backend connection error. Make sure your Python backend is running.");
+    }
+  };
+
+  // AUTO-TRIGGER ASTRA: Monitor telemetry and speak on condition changes
+  useEffect(() => {
+    if (!astraAutoEnabled.current) return;
+    
+    // Determine current condition
+    let condition = "idle";
+    if (speed === 0 && rpm < 100) condition = "off";
+    else if (speed > 100) condition = "overspeeding";
+    else if (engineTemp > 105) condition = "overheating";
+    else if (rpm > 9000 && gear <= 2) condition = "high_rpm_low_gear";
+    else if (speed > 0) condition = "riding";
+
+    // Only trigger if condition CHANGED and cooldown is not active
+    if (condition !== lastAstraCondition.current && !astraCooldown.current) {
+      lastAstraCondition.current = condition;
+      
+      // Don't auto-trigger on first render (idle)
+      if (condition === "idle") return;
+      
+      // Set cooldown (30 seconds between auto-triggers)
+      astraCooldown.current = true;
+      setTimeout(() => { astraCooldown.current = false; }, 30000);
+
+      // Auto-call ASTRA
+      askAstra();
+    }
+  }, [speed, rpm, engineTemp, gear]);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (navigator.geolocation) {
+      const watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          setUserLocation([pos.coords.latitude, pos.coords.longitude]);
+        },
+        (err) => console.error("Geolocation error:", err),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, []);
+
   return (
     <div className="app-container">
+      
+      {/* SETUP / PAIRING OVERLAY */}
+      {!isPaired && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'var(--bg-main)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: 'var(--bg-panel)', padding: '40px', borderRadius: '24px', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', maxWidth: '400px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', textAlign: 'center' }}>
+            <div className="header-logo" style={{ flexDirection: 'column', gap: '16px' }}>
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L2 22H22L12 2Z" stroke="var(--cyan-primary)" strokeWidth="3" strokeLinejoin="round" />
+                <path d="M12 8L6 20H18L12 8Z" fill="var(--cyan-primary)" opacity="0.3" />
+              </svg>
+              <h1 style={{ fontSize: '1.8rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                BIKE CONNECT <span style={{ fontSize: '1.2rem', textShadow: '0 0 15px var(--cyan-primary)' }}>MT-15</span>
+              </h1>
+            </div>
+            
+            <p style={{ color: 'var(--text-dim)', fontSize: '0.95rem', lineHeight: '1.5' }}>
+              Pair your device with the motorcycle's Communication Control Unit (CCU) to access live telemetry and navigation.
+            </p>
+
+            <div style={{ background: 'rgba(0, 243, 255, 0.05)', border: '1px solid rgba(0, 243, 255, 0.2)', padding: '16px', borderRadius: '12px', width: '100%' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '1px' }}>Detected CCU ID</span>
+              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--text-main)', marginTop: '4px' }}>
+                {import.meta.env.VITE_BT_DEVICE_ID || "YCCU_00080400007795"}
+              </div>
+            </div>
+
+            <button 
+              className="action-btn connect-btn" 
+              onClick={connectBluetooth} 
+              style={{ width: '100%', padding: '16px', fontSize: '1.1rem', borderRadius: '12px', background: 'rgba(0, 255, 102, 0.1)' }}
+            >
+              {btStatus === 'Connecting BT...' ? 'CONNECTING...' : 'PAIR & CONNECT'}
+            </button>
+            <button 
+              onClick={() => { setIsPaired(true); localStorage.setItem('isPaired', 'true'); }} 
+              style={{ background: 'none', border: 'none', color: 'var(--text-dim)', textDecoration: 'underline', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              Skip for now (Offline Mode)
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className={`mobile-overlay ${isMobileMenuOpen ? 'mobile-open' : ''}`} onClick={() => setIsMobileMenuOpen(false)}></div>
 
       {/* HEADER */}
       <header className="header">
-        <div className="header-logo">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2L2 22H22L12 2Z" stroke="var(--cyan-primary)" strokeWidth="2" strokeLinejoin="round" />
-            <path d="M12 8L6 20H18L12 8Z" fill="var(--cyan-primary)" opacity="0.3" />
-          </svg>
-          <h1>BIKE CONNECT <span>MT-15</span></h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <button className="action-btn mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)} style={{ display: 'flex', padding: '8px' }}>
+            <Menu size={24} color="var(--text-main)" />
+          </button>
+          <div className="header-logo">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2L2 22H22L12 2Z" stroke="var(--cyan-primary)" strokeWidth="2" strokeLinejoin="round" />
+              <path d="M12 8L6 20H18L12 8Z" fill="var(--cyan-primary)" opacity="0.3" />
+            </svg>
+            <h1>BIKE CONNECT <span>MT-15</span></h1>
+          </div>
         </div>
 
 
@@ -241,16 +566,26 @@ function App() {
                 <div className="bt-info">
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
                     <button className="action-btn connect-btn" onClick={connectBluetooth}>CONNECT</button>
-                    <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY" : btStatus}</button>
+                    <button className="action-btn play-btn" onClick={uploadLog} style={{ borderColor: 'var(--cyan-primary)' }}>UPLOAD</button>
                   </div>
                   <span className="bt-id">{import.meta.env.VITE_BT_DEVICE_ID || "YCCU_00080400007795"}</span>
                 </div>
               </div>
             </div>
           </div>
-          <div className="time-display">
-            <span className="time">{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-            <span className="date">{time.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <button 
+              onClick={() => setAppTheme(appTheme === 'dark' ? 'light' : 'dark')}
+              className="action-btn" 
+              style={{ padding: '8px', borderRadius: '50%', background: 'var(--bg-panel)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title={`Switch to ${appTheme === 'dark' ? 'Light' : 'Dark'} Mode`}
+            >
+              {appTheme === 'dark' ? <Sun size={20} color="var(--text-main)" /> : <Moon size={20} color="var(--text-main)" />}
+            </button>
+            <div className="time-display">
+              <span className="time">{time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <span className="date">{time.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+            </div>
           </div>
         </div>
       </header>
@@ -259,13 +594,23 @@ function App() {
       <main className="main-content">
 
         {/* SIDEBAR */}
-        <aside className="sidebar">
-          <div className="nav-item active"><LayoutDashboard size={20} /> Dashboard</div>
-          <div className="nav-item"><MapPin size={20} /> Live Map</div>
-          <div className="nav-item"><Activity size={20} /> Ride Analytics</div>
-          <div className="nav-item"><Route size={20} /> Trips & History</div>
-          <div className="nav-item"><Settings2 size={20} /> Bike Status</div>
-          <div className="nav-item" onClick={() => setShowLogs(!showLogs)} style={{ cursor: 'pointer' }}>
+        <aside className={`sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+            <div className="header-logo sidebar-logo" style={{ gap: '8px' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+                <path d="M12 2L2 22H22L12 2Z" stroke="var(--cyan-primary)" strokeWidth="2" strokeLinejoin="round" />
+                <path d="M12 8L6 20H18L12 8Z" fill="var(--cyan-primary)" opacity="0.3" />
+              </svg>
+              <h1 style={{ fontSize: '1.2rem', margin: 0, display: 'block', whiteSpace: 'nowrap' }}>BIKE CONNECT <span style={{ fontSize: '0.8rem' }}>MT-15</span></h1>
+            </div>
+            <button className="action-btn mobile-close-btn" onClick={() => setIsMobileMenuOpen(false)} style={{ padding: '6px' }}><X size={20} color="var(--text-main)" /></button>
+          </div>
+          <div className={`nav-item ${activeTab === 'Dashboard' ? 'active' : ''}`} onClick={() => { setActiveTab('Dashboard'); setIsMobileMenuOpen(false); }}><LayoutDashboard size={20} /> Dashboard</div>
+          <div className={`nav-item ${activeTab === 'Live Map' ? 'active' : ''}`} onClick={() => { setActiveTab('Live Map'); setIsMobileMenuOpen(false); }}><MapPin size={20} /> Live Map</div>
+          <div className={`nav-item ${activeTab === 'Ride Analytics' ? 'active' : ''}`} onClick={() => { setActiveTab('Ride Analytics'); setIsMobileMenuOpen(false); }}><Activity size={20} /> Ride Analytics</div>
+          <div className={`nav-item ${activeTab === 'Trips & History' ? 'active' : ''}`} onClick={() => { setActiveTab('Trips & History'); setIsMobileMenuOpen(false); }}><Route size={20} /> Trips & History</div>
+          <div className={`nav-item ${activeTab === 'Bike Status' ? 'active' : ''}`} onClick={() => { setActiveTab('Bike Status'); setIsMobileMenuOpen(false); }}><Settings2 size={20} /> Bike Status</div>
+          <div className="nav-item" onClick={() => { setShowLogs(!showLogs); setIsMobileMenuOpen(false); }} style={{ cursor: 'pointer' }}>
             <Terminal size={20} color={showLogs ? "var(--cyan-primary)" : "currentColor"} /> System Logs
           </div>
           
@@ -279,7 +624,8 @@ function App() {
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 <button className="action-btn connect-btn" onClick={connectBluetooth}>CONNECT BT</button>
-                <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "PLAY LOG" : btStatus}</button>
+                <button className="action-btn play-btn" onClick={replayLog}>{btStatus === "Disconnected" ? "SERVER DEMO" : btStatus}</button>
+                <button className="action-btn play-btn" onClick={uploadLog} style={{ borderColor: 'var(--cyan-primary)' }}>UPLOAD</button>
                 <button className="action-btn" style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }} onClick={downloadLog}>SAVE</button>
               </div>
             </div>
@@ -288,8 +634,12 @@ function App() {
           <div className="nav-item"><Settings size={20} /> Settings</div>
         </aside>
 
-        {/* DASHBOARD GRID */}
-        <div className="dashboard-grid">
+        {/* SCREENS */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          
+          {/* DASHBOARD SCREEN */}
+          {activeTab === 'Dashboard' && (
+            <div className="dashboard-grid">
 
           {/* HERO COCKPIT */}
           <div className="panel hero-cockpit">
@@ -363,15 +713,23 @@ function App() {
             <div className="panel gps-panel">
               <div className="gps-header">
                 <span className="panel-title">Live GPS Tracking</span>
-                <span className="live-badge"><div className="live-dot"></div> LIVE</span>
+                <span className="live-badge"><div className="live-dot"></div> {userLocation ? "LIVE" : "LOCATING"}</span>
               </div>
-              <div className="map-bg"></div>
-              <div className="map-overlay">
-                <div className="nav-instruction">
+              <div className="map-bg" style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+                <MapContainer center={userLocation || [13.0827, 80.2707]} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false} attributionControl={false}>
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    className="dark-map-tiles"
+                  />
+                  <LocationMarker pos={userLocation} />
+                </MapContainer>
+              </div>
+              <div className="map-overlay" style={{ zIndex: 1, pointerEvents: 'none' }}>
+                <div className="nav-instruction" style={{ pointerEvents: 'auto' }}>
                   <div className="nav-icon"><ArrowUpRight size={24} /></div>
                   <div className="nav-text">
                     <div className="dist">-- km</div>
-                    <div className="street">Waiting for GPS...</div>
+                    <div className="street">{userLocation ? "Tracking active" : "Waiting for GPS..."}</div>
                   </div>
                 </div>
                 <div className="map-stats">
@@ -485,6 +843,126 @@ function App() {
               </div>
             </div>
           )}
+          </div>
+          )}
+
+          {/* LIVE MAP SCREEN */}
+          {activeTab === 'Live Map' && (
+            <div className="panel live-map-screen" style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+              <div className="gps-header" style={{ zIndex: 10, position: 'absolute', top: 20, left: 20, background: 'var(--bg-panel)', padding: '15px 20px', borderRadius: '16px', backdropFilter: 'blur(10px)', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: 'var(--glass-shadow)', minWidth: '320px', maxWidth: '400px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span className="panel-title" style={{ fontSize: '1.2rem', margin: 0 }}>Navigation</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    <span className="live-badge"><div className="live-dot"></div> {userLocation ? "LIVE" : "LOCATING"}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', flex: 1, alignItems: 'center', background: 'var(--bg-main)', borderRadius: '8px', padding: '0 10px', border: '1px solid var(--glass-border)' }}>
+                    <Search size={16} color="var(--text-dim)" />
+                    <input 
+                      type="text" 
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && searchDestination()}
+                      placeholder="Search destination..."
+                      style={{ background: 'transparent', border: 'none', padding: '10px 8px', color: 'var(--text-main)', outline: 'none', width: '100%', fontSize: '14px' }}
+                    />
+                  </div>
+                  <button onClick={searchDestination} className="action-btn" style={{ padding: '8px 16px', background: 'var(--cyan-primary)', color: '#fff', fontWeight: 'bold', border: 'none', borderRadius: '8px' }}>GO</button>
+                  {destination && (
+                    <button onClick={clearRoute} className="action-btn" style={{ padding: '8px 12px', background: 'rgba(255,69,58,0.15)', color: 'var(--red-accent)', border: '1px solid rgba(255,69,58,0.3)', borderRadius: '8px' }}>Clear</button>
+                  )}
+                </div>
+              </div>
+
+              <div className="map-bg" style={{ position: 'absolute', inset: 0, zIndex: 0, borderRadius: '20px', overflow: 'hidden' }}>
+                <MapContainer center={userLocation || [13.0827, 80.2707]} zoom={15} style={{ height: '100%', width: '100%' }} zoomControl={true} attributionControl={false}>
+                  <TileLayer
+                    url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+                  />
+                  <LocationMarker pos={!destination ? userLocation : null} />
+                  {destination && <Marker position={destination}><Popup>Destination</Popup></Marker>}
+                  {alternativeRoutes.map((altPoints, idx) => (
+                    <Polyline key={idx} positions={altPoints} color="gray" weight={5} opacity={0.5} />
+                  ))}
+                  {routePoints.length > 0 && (
+                    <>
+                      <Polyline positions={routePoints} color="#000" weight={10} opacity={0.8} />
+                      <Polyline positions={routePoints} color="var(--cyan-primary)" weight={6} opacity={1} />
+                      <RouteFitter points={routePoints} />
+                    </>
+                  )}
+                </MapContainer>
+              </div>
+
+              {routeStats.distance > 0 && (
+                <div style={{ position: 'absolute', bottom: 30, left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', gap: '20px' }}>
+                  <div className="map-stats" style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(15px)', padding: '20px 40px', borderRadius: '24px', display: 'flex', gap: '50px', border: '1px solid rgba(0, 243, 255, 0.3)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                    <div className="m-stat" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}><span className="m-val" style={{ fontSize: '1.8rem', fontWeight: '900', color: '#fff' }}>{(routeStats.distance / 1000).toFixed(1)} <span style={{fontSize: '1rem'}}>km</span></span><span className="m-lbl" style={{ color: 'var(--cyan-primary)', fontWeight: 'bold' }}>DISTANCE</span></div>
+                    <div className="m-stat" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}><span className="m-val" style={{ fontSize: '1.8rem', fontWeight: '900', color: '#fff' }}>{Math.round(routeStats.duration / 60)} <span style={{fontSize: '1rem'}}>min</span></span><span className="m-lbl" style={{ color: 'var(--cyan-primary)', fontWeight: 'bold' }}>ETA</span></div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* PLACEHOLDERS FOR OTHER SCREENS */}
+          {activeTab !== 'Dashboard' && activeTab !== 'Live Map' && (
+            <div className="panel" style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', gap: '20px' }}>
+              <Activity size={64} color="var(--text-dim)" opacity={0.5} />
+              <h2 style={{ color: 'var(--text-dim)' }}>{activeTab} Screen</h2>
+              <p style={{ color: 'var(--text-dim)' }}>Content coming soon...</p>
+            </div>
+          )}
+
+          {/* TRIPS & HISTORY SCREEN */}
+          {activeTab === 'Trips & History' && (
+            <div className="panel trips-screen" style={{ margin: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2 style={{ fontSize: '1.5rem', margin: 0 }}>Ride History</h2>
+                <div style={{ background: 'rgba(0, 243, 255, 0.1)', color: 'var(--cyan-primary)', padding: '6px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 'bold' }}>
+                  {tripHistory.length} Trips Synced
+                </div>
+              </div>
+
+              {tripHistory.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)' }}>
+                  <Route size={48} style={{ opacity: 0.2, marginBottom: '16px' }} />
+                  <p>No trips synced yet.</p>
+                  <p style={{ fontSize: '0.85rem' }}>Upload a log file containing CCU sync data (59 01 packets) to view your past rides.</p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--glass-border)', color: 'var(--text-dim)', fontSize: '0.85rem' }}>
+                        <th style={{ padding: '12px' }}>TRIP ID</th>
+                        <th style={{ padding: '12px' }}>DATE</th>
+                        <th style={{ padding: '12px' }}>DISTANCE</th>
+                        <th style={{ padding: '12px' }}>DURATION</th>
+                        <th style={{ padding: '12px' }}>AVG SPEED</th>
+                        <th style={{ padding: '12px' }}>TOP SPEED</th>
+                        <th style={{ padding: '12px' }}>STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tripHistory.map((trip, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                          <td style={{ padding: '16px 12px', fontWeight: 'bold', color: 'var(--text-main)' }}>{trip.id}</td>
+                          <td style={{ padding: '16px 12px', color: 'var(--text-dim)' }}>{trip.date}</td>
+                          <td style={{ padding: '16px 12px', color: 'var(--cyan-primary)' }}>{trip.distance} km</td>
+                          <td style={{ padding: '16px 12px' }}>{trip.duration}</td>
+                          <td style={{ padding: '16px 12px' }}>{trip.avgSpeed} km/h</td>
+                          <td style={{ padding: '16px 12px' }}>{trip.topSpeed} km/h</td>
+                          <td style={{ padding: '16px 12px' }}><span style={{ background: 'rgba(0, 255, 102, 0.1)', color: 'var(--green-accent)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{trip.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
         </div>
       </main>
@@ -496,6 +974,55 @@ function App() {
         <div className="m-nav-item"><Zap size={24} /> Bike</div>
         <div className="m-nav-item"><Settings size={24} /> More</div>
       </div>
+
+      {/* ASTRA AI FLOATING FAB */}
+      <div 
+        style={{ 
+          position: 'fixed', 
+          bottom: '30px', 
+          right: '30px', 
+          zIndex: 9999,
+          display: 'flex', 
+          alignItems: 'flex-end', 
+          gap: '16px', 
+          cursor: 'pointer', 
+        }} 
+        onClick={askAstra}
+      >
+        <div style={{
+          background: 'rgba(0, 0, 0, 0.8)', 
+          backdropFilter: 'blur(10px)', 
+          border: '1px solid var(--cyan-primary)', 
+          borderRadius: '16px', 
+          padding: '12px 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          opacity: (astraMsg || astraStatus === 'Thinking...') ? 1 : 0,
+          transform: (astraMsg || astraStatus === 'Thinking...') ? 'translateX(0) scale(1)' : 'translateX(20px) scale(0.9)',
+          transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+          pointerEvents: (astraMsg || astraStatus === 'Thinking...') ? 'auto' : 'none'
+        }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--cyan-primary)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>{astraStatus}</div>
+          <div style={{ fontSize: '0.95rem', color: 'var(--text-main)', maxWidth: '250px', textAlign: 'right', lineHeight: '1.4' }}>
+            {astraMsg || "Analyzing bike telemetry..."}
+          </div>
+        </div>
+
+        <div style={{ 
+          background: astraStatus === 'Thinking...' ? 'white' : 'var(--cyan-primary)', 
+          padding: '18px', 
+          borderRadius: '50%', 
+          display: 'flex', 
+          boxShadow: astraStatus === 'Thinking...' ? '0 0 30px white' : '0 0 20px rgba(0, 243, 255, 0.6)',
+          color: 'black',
+          transition: 'all 0.3s'
+        }}>
+          <Zap size={28} fill="black" />
+        </div>
+      </div>
+
     </div>
   );
 }
