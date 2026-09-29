@@ -302,10 +302,6 @@ function App() {
               src="/gemini_generated_video_4a1c27eb.mp4"
             />
 
-            <div className="bike-model-container">
-              <img src="/mt15.png" alt="Yamaha MT-15" />
-            </div>
-
             <div className="speedometer-container">
               <div className="speed-ring"></div>
               <div className="speed-ring-active"></div>
